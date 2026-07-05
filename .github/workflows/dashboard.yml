@@ -34,10 +34,11 @@ jobs:
       - name: Generate dashboard
         run: python generate.py
         env:
-          # PROJECTS_TOKEN (a PAT with repo + read:project) is needed to read
-          # Priority/Severity project fields; falls back to the default token,
-          # which can see everything else.
-          GITHUB_TOKEN: ${{ secrets.PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with repo + read:project, used only to read Priority/Severity
+          # project fields. NVIDIA enterprise policy: lifetime must be <= 366
+          # days or the org rejects it. Optional — the script falls back.
+          PROJECTS_TOKEN: ${{ secrets.PROJECTS_TOKEN }}
 
       - uses: actions/configure-pages@v5
 

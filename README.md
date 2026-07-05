@@ -34,7 +34,9 @@ from the issue's GitHub Project (v2) single-select fields named `Priority` and
 a token with the `read:project` scope, which neither the default Actions token
 nor a plain `repo` PAT has. To enable the check, add a repo secret named
 **`PROJECTS_TOKEN`** containing a PAT with `repo` + `read:project` scopes
-(Settings → Secrets and variables → Actions). Without it the dashboard still
+(Settings → Secrets and variables → Actions). Note: the NVIDIA enterprise
+rejects classic PATs with a lifetime over 366 days, so set the token's
+expiration to a year or less. Without a working token the dashboard still
 works — it just can't see those fields, logs a warning, and treats no issue as
 triaged.
 

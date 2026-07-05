@@ -505,15 +505,22 @@ def main():
     session.headers["Authorization"] = f"Bearer {token}"
 
     prs = fetch_all(session, PR_QUERY, variables, "pullRequests")
-    try:
-        issues = fetch_all(session, ISSUE_QUERY_TEMPLATE % PROJECT_FIELDS_FRAGMENT,
-                           variables, "issues")
-    except RuntimeError as e:
-        if "INSUFFICIENT_SCOPES" not in str(e):
-            raise
-        print("WARNING: token lacks read:project scope — priority/severity "
-              "project fields are invisible, so no issue is treated as triaged. "
-              "Add a PROJECTS_TOKEN secret with read:project to enable it.")
+
+    # Issues: try the project-fields query with PROJECTS_TOKEN first, then the
+    # default token; a rejected/underscoped token must never break the build.
+    issues = None
+    full_query = ISSUE_QUERY_TEMPLATE % PROJECT_FIELDS_FRAGMENT
+    for tok, label in ((os.environ.get("PROJECTS_TOKEN"), "PROJECTS_TOKEN"),
+                       (token, "default token")):
+        if not tok or issues is not None:
+            continue
+        s = requests.Session()
+        s.headers["Authorization"] = f"Bearer {tok}"
+        try:
+            issues = fetch_all(s, full_query, variables, "issues")
+        except RuntimeError as e:
+            print(f"WARNING: project-fields issue query failed with {label}: {e}")
+    if issues is None:
         issues = fetch_all(session, ISSUE_QUERY_TEMPLATE % "", variables, "issues")
     print(f"Fetched {len(prs)} open PRs, {len(issues)} open issues")
 
