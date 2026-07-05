@@ -180,7 +180,7 @@ def collect_events(node, is_pr, bots):
     return [(ts, actor, desc) for ts, actor, desc in events if not is_bot(actor, bots)]
 
 
-def classify(node, is_pr, maintainers, bots, stale_cutoff):
+def classify(node, is_pr, maintainers, bots, stale_cutoff, triaged_when_set):
     author = (node.get("author") or {}).get("login") or "ghost"
     events = collect_events(node, is_pr, bots)
     if not events:
@@ -200,8 +200,8 @@ def classify(node, is_pr, maintainers, bots, stale_cutoff):
     else:
         state = "awaiting_maintainer"
 
-    # Issues with type + priority + severity set are considered triaged:
-    # they don't need a first response even if no maintainer commented.
+    # Issues whose triage fields (config: triaged_when_set) are all filled in
+    # are considered triaged: no first response needed even without a comment.
     issue_type = (node.get("issueType") or {}).get("name")
     fields = {}
     for pi in ((node.get("projectItems") or {}).get("nodes") or []):
@@ -209,9 +209,9 @@ def classify(node, is_pr, maintainers, bots, stale_cutoff):
             fname = ((fv.get("field") or {}).get("name") or "").lower()
             if fname and fv.get("name"):
                 fields[fname] = fv["name"]
-    priority = fields.get("priority")
-    severity = fields.get("severity")
-    if state == "needs_first_response" and issue_type and priority and severity:
+    triage_values = {"issue_type": issue_type, **fields}
+    if (state == "needs_first_response" and triaged_when_set
+            and all(triage_values.get(f) for f in triaged_when_set)):
         state = "triaged"
 
     section = "stale" if last_ts < stale_cutoff else state
@@ -235,8 +235,9 @@ def classify(node, is_pr, maintainers, bots, stale_cutoff):
         "is_draft": node.get("isDraft", False),
         "labels": [l["name"] for l in node["labels"]["nodes"]],
         "issue_type": issue_type,
-        "priority": priority,
-        "severity": severity,
+        "priority": fields.get("priority"),
+        "severity": fields.get("severity"),
+        "project_fields": fields,
         "review_decision": node.get("reviewDecision"),
         "ci_state": ci,
         "unresolved_threads": unresolved,
@@ -524,8 +525,11 @@ def main():
         issues = fetch_all(session, ISSUE_QUERY_TEMPLATE % "", variables, "issues")
     print(f"Fetched {len(prs)} open PRs, {len(issues)} open issues")
 
-    items = ([classify(n, True, maintainers, bots, stale_cutoff) for n in prs]
-             + [classify(n, False, maintainers, bots, stale_cutoff) for n in issues])
+    triaged_when_set = [f.lower() for f in cfg.get("triaged_when_set", [])]
+    items = ([classify(n, True, maintainers, bots, stale_cutoff, triaged_when_set)
+              for n in prs]
+             + [classify(n, False, maintainers, bots, stale_cutoff, triaged_when_set)
+                for n in issues])
 
     if not any(it["priority"] or it["severity"] for it in items):
         print("NOTE: no Priority/Severity project field values visible on any "

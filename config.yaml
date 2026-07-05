@@ -7,6 +7,14 @@ repo:
 # Days without meaningful activity before an item is moved to the Stale section
 stale_days: 80
 
+# An issue with ALL of these fields set is considered triaged and skips
+# "Needs first response". issue_type is GitHub's native type (Bug/Feature/
+# Task); other entries are Projects-v2 single-select field names (lowercase).
+triaged_when_set:
+  - issue_type
+  - priority
+  - severity
+
 # GitHub logins treated as maintainers/team. If the last meaningful activity on
 # an item was by someone NOT on this list, the item needs maintainer attention.
 maintainers:
