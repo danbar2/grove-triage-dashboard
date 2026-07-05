@@ -356,11 +356,9 @@ def render_html(items, cfg, now):
     for it in items:
         by_section[it["section"]].append(it)
 
-    # Working queues: longest-waiting first. Awaiting author: most recent first.
-    for key in ("needs_first_response", "awaiting_maintainer", "stale"):
-        by_section[key].sort(key=lambda i: i["last_activity_at"])
-    for key in ("awaiting_author", "triaged"):
-        by_section[key].sort(key=lambda i: i["last_activity_at"], reverse=True)
+    # All sections: newest activity first.
+    for rows in by_section.values():
+        rows.sort(key=lambda i: i["last_activity_at"], reverse=True)
 
     stale_desc = (f"No meaningful activity for {cfg['stale_days']}+ days "
                   "(in either direction).")

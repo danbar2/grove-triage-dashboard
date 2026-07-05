@@ -12,15 +12,16 @@ For every open issue/PR it computes the **last meaningful activity** — comment
 reviews, commits, force-pushes, review-thread replies, ready-for-review. Label,
 milestone, assignment, and project churn is ignored, as is bot activity.
 
-Items are grouped by whose turn it is:
+Items are grouped by whose turn it is; every section is sorted by last
+meaningful activity, newest first:
 
-| Section | Meaning | Sort |
-|---|---|---|
-| **Needs first response** | No maintainer has engaged yet | longest-waiting first |
-| **Awaiting maintainer** | Author/community acted last (replied, pushed, resolved threads) — the working queue | longest-waiting first |
-| **Awaiting author** | A maintainer responded last; ball is with the author | most recent first |
-| **Triaged backlog** | Issues with type (Bug/Feature/Task), Priority and Severity all set — already triaged, no first response needed | most recent first |
-| **Stale** | No meaningful activity for 80+ days (either direction) | oldest first |
+| Section | Meaning |
+|---|---|
+| **Needs first response** | No maintainer has engaged yet |
+| **Awaiting maintainer** | Author/community acted last (replied, pushed, resolved threads) — the working queue |
+| **Awaiting author** | A maintainer responded last; ball is with the author |
+| **Triaged backlog** | Issues with the `triaged_when_set` fields (issue type + Priority) all set — already triaged, no first response needed |
+| **Stale** | No meaningful activity for 80+ days (either direction) |
 
 Classification rule: if the last non-bot actor is a maintainer (and not the
 item's own author), the item is *awaiting author*; otherwise it's *awaiting
