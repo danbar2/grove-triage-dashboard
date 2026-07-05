@@ -266,7 +266,7 @@ def render_rows(items, now, show_state=False):
         desc = html.escape(it["last_activity_desc"])
         extra = f" {state_chip(it['state'])}" if show_state else ""
         rows.append(f"""
-        <tr>
+        <tr data-type="{it['type']}">
           <td class="num"><a href="{it['url']}">#{it['number']}</a></td>
           <td class="title"><a href="{it['url']}">{title}</a><div class="chips">{chips(it)}{extra}</div></td>
           <td class="author">{html.escape(it['author'])}</td>
@@ -274,6 +274,38 @@ def render_rows(items, now, show_state=False):
           <td class="when" title="{it['last_activity_at']}">{rel_time(it['last_activity_at'], now)}</td>
         </tr>""")
     return "\n".join(rows)
+
+
+FILTER_SCRIPT = """
+<script>
+(function () {
+  var buttons = document.querySelectorAll('.filter button');
+  function applyFilter(f) {
+    buttons.forEach(function (b) {
+      b.classList.toggle('active', b.dataset.filter === f);
+    });
+    document.querySelectorAll('details.section').forEach(function (sec) {
+      var visible = 0;
+      sec.querySelectorAll('tbody tr[data-type]').forEach(function (tr) {
+        var show = f === 'all' || tr.dataset.type === f;
+        tr.style.display = show ? '' : 'none';
+        if (show) visible++;
+      });
+      sec.querySelector('.empty-row').style.display = visible ? 'none' : '';
+      sec.querySelector('.count').textContent = visible;
+      var card = document.querySelector(
+        '.card[data-section="' + sec.dataset.section + '"] .n');
+      if (card) card.textContent = visible;
+    });
+    try { history.replaceState(null, '', f === 'all' ? location.pathname : '#' + f); } catch (e) {}
+  }
+  buttons.forEach(function (b) {
+    b.addEventListener('click', function () { applyFilter(b.dataset.filter); });
+  });
+  var initial = location.hash.replace('#', '');
+  if (initial === 'pr' || initial === 'issue') applyFilter(initial);
+})();
+</script>"""
 
 
 def render_html(items, cfg, now):
@@ -292,11 +324,13 @@ def render_html(items, cfg, now):
     for key, title, desc in SECTIONS:
         rows = by_section[key]
         desc = desc or stale_desc
+        empty_style = ' style="display:none"' if rows else ""
         body = (render_rows(rows, now, show_state=(key == "stale"))
-                if rows else '<tr><td colspan="5" class="empty">Nothing here 🎉</td></tr>')
+                + f'\n<tr class="empty-row"{empty_style}>'
+                  '<td colspan="5" class="empty">Nothing here 🎉</td></tr>')
         open_attr = "" if key == "awaiting_author" else " open"
         sections_html.append(f"""
-    <details class="section {key}"{open_attr}>
+    <details class="section {key}" data-section="{key}"{open_attr}>
       <summary><h2>{title} <span class="count">{len(rows)}</span></h2><p>{desc}</p></summary>
       <table>
         <thead><tr><th>#</th><th>Title</th><th>Author</th><th>Last meaningful activity</th><th>When</th></tr></thead>
@@ -325,7 +359,16 @@ def render_html(items, cfg, now):
   header h1 {{ margin: 0 0 4px; font-size: 22px; }}
   header .sub {{ color: var(--muted); margin-bottom: 20px; }}
   header a {{ color: var(--accent); text-decoration: none; }}
-  .cards {{ display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }}
+  .toolbar {{ display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start;
+              justify-content: space-between; margin-bottom: 24px; }}
+  .cards {{ display: flex; gap: 12px; flex-wrap: wrap; }}
+  .filter {{ display: flex; border: 1px solid var(--border); border-radius: 8px;
+             overflow: hidden; }}
+  .filter button {{ background: var(--panel); color: var(--muted); border: none;
+                    padding: 8px 16px; font: inherit; cursor: pointer; }}
+  .filter button + button {{ border-left: 1px solid var(--border); }}
+  .filter button.active {{ background: var(--border); color: var(--fg); font-weight: 600; }}
+  .filter button:hover {{ color: var(--fg); }}
   .card {{ background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
            padding: 12px 18px; min-width: 150px; }}
   .card .n {{ font-size: 26px; font-weight: 700; }}
@@ -378,16 +421,24 @@ def render_html(items, cfg, now):
       <a href="data.json">data.json</a>
     </div>
   </header>
-  <div class="cards">
-    <div class="card needs_first_response"><div class="n">{counts['needs_first_response']}</div><div class="l">needs first response</div></div>
-    <div class="card awaiting_maintainer"><div class="n">{counts['awaiting_maintainer']}</div><div class="l">awaiting maintainer</div></div>
-    <div class="card awaiting_author"><div class="n">{counts['awaiting_author']}</div><div class="l">awaiting author</div></div>
-    <div class="card stale"><div class="n">{counts['stale']}</div><div class="l">stale ({cfg['stale_days']}d+)</div></div>
+  <div class="toolbar">
+    <div class="cards">
+      <div class="card needs_first_response" data-section="needs_first_response"><div class="n">{counts['needs_first_response']}</div><div class="l">needs first response</div></div>
+      <div class="card awaiting_maintainer" data-section="awaiting_maintainer"><div class="n">{counts['awaiting_maintainer']}</div><div class="l">awaiting maintainer</div></div>
+      <div class="card awaiting_author" data-section="awaiting_author"><div class="n">{counts['awaiting_author']}</div><div class="l">awaiting author</div></div>
+      <div class="card stale" data-section="stale"><div class="n">{counts['stale']}</div><div class="l">stale ({cfg['stale_days']}d+)</div></div>
+    </div>
+    <div class="filter" role="group" aria-label="Filter by type">
+      <button class="active" data-filter="all">All</button>
+      <button data-filter="pr">PRs</button>
+      <button data-filter="issue">Issues</button>
+    </div>
   </div>
   {''.join(sections_html)}
   <footer>Refreshed twice a day (06:00 / 18:00 UTC) by GitHub Actions.
   Maintainers list lives in <code>config.yaml</code>.</footer>
 </div>
+{FILTER_SCRIPT}
 </body>
 </html>
 """
