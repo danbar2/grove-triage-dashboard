@@ -34,7 +34,10 @@ jobs:
       - name: Generate dashboard
         run: python generate.py
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PROJECTS_TOKEN (a PAT with repo + read:project) is needed to read
+          # Priority/Severity project fields; falls back to the default token,
+          # which can see everything else.
+          GITHUB_TOKEN: ${{ secrets.PROJECTS_TOKEN || secrets.GITHUB_TOKEN }}
 
       - uses: actions/configure-pages@v5
 

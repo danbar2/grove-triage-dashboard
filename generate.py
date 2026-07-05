@@ -58,7 +58,9 @@ query($owner: String!, $name: String!, $cursor: String) {
 }
 """
 
-ISSUE_QUERY = """
+# %s is replaced with the project-fields fragment when the token has
+# read:project scope, empty string otherwise.
+ISSUE_QUERY_TEMPLATE = """
 query($owner: String!, $name: String!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     issues(states: OPEN, first: 50, after: $cursor,
@@ -67,6 +69,7 @@ query($owner: String!, $name: String!, $cursor: String) {
       nodes {
         number title url createdAt
         author { login }
+        issueType { name }
         labels(first: 10) { nodes { name } }
         timelineItems(last: 60, itemTypes: [ISSUE_COMMENT]) {
           nodes {
@@ -74,10 +77,26 @@ query($owner: String!, $name: String!, $cursor: String) {
             ... on IssueComment { createdAt author { login } }
           }
         }
+        %s
       }
     }
   }
 }
+"""
+
+PROJECT_FIELDS_FRAGMENT = """
+        projectItems(first: 10, includeArchived: false) {
+          nodes {
+            fieldValues(first: 30) {
+              nodes {
+                ... on ProjectV2ItemFieldSingleSelectValue {
+                  name
+                  field { ... on ProjectV2FieldCommon { name } }
+                }
+              }
+            }
+          }
+        }
 """
 
 SECTIONS = [
@@ -87,6 +106,8 @@ SECTIONS = [
      "The author/community acted last (replied, pushed, resolved threads) — your working queue."),
     ("awaiting_author", "Awaiting author",
      "A maintainer responded last — the ball is with the author."),
+    ("triaged", "Triaged backlog",
+     "Type, priority and severity are set — already triaged, no first response needed."),
     ("stale", "Stale",
      None),  # description filled in with stale_days at render time
 ]
@@ -179,6 +200,20 @@ def classify(node, is_pr, maintainers, bots, stale_cutoff):
     else:
         state = "awaiting_maintainer"
 
+    # Issues with type + priority + severity set are considered triaged:
+    # they don't need a first response even if no maintainer commented.
+    issue_type = (node.get("issueType") or {}).get("name")
+    fields = {}
+    for pi in ((node.get("projectItems") or {}).get("nodes") or []):
+        for fv in pi["fieldValues"]["nodes"]:
+            fname = ((fv.get("field") or {}).get("name") or "").lower()
+            if fname and fv.get("name"):
+                fields[fname] = fv["name"]
+    priority = fields.get("priority")
+    severity = fields.get("severity")
+    if state == "needs_first_response" and issue_type and priority and severity:
+        state = "triaged"
+
     section = "stale" if last_ts < stale_cutoff else state
 
     unresolved = None
@@ -199,6 +234,9 @@ def classify(node, is_pr, maintainers, bots, stale_cutoff):
         "created_at": node["createdAt"],
         "is_draft": node.get("isDraft", False),
         "labels": [l["name"] for l in node["labels"]["nodes"]],
+        "issue_type": issue_type,
+        "priority": priority,
+        "severity": severity,
         "review_decision": node.get("reviewDecision"),
         "ci_state": ci,
         "unresolved_threads": unresolved,
@@ -245,6 +283,9 @@ def chips(item):
         out.append('<span class="chip pending">CI pending</span>')
     if item["unresolved_threads"]:
         out.append(f'<span class="chip warn">{item["unresolved_threads"]} unresolved</span>')
+    for key in ("issue_type", "priority", "severity"):
+        if item.get(key):
+            out.append(f'<span class="chip">{html.escape(item[key])}</span>')
     return " ".join(out)
 
 
@@ -253,6 +294,7 @@ def state_chip(state):
         "needs_first_response": ("needs first response", "bad"),
         "awaiting_maintainer": ("awaiting maintainer", "warn"),
         "awaiting_author": ("awaiting author", "muted"),
+        "triaged": ("triaged", "muted"),
     }
     text, cls = labels.get(state, (state, "muted"))
     return f'<span class="chip {cls}">{text}</span>'
@@ -316,7 +358,8 @@ def render_html(items, cfg, now):
     # Working queues: longest-waiting first. Awaiting author: most recent first.
     for key in ("needs_first_response", "awaiting_maintainer", "stale"):
         by_section[key].sort(key=lambda i: i["last_activity_at"])
-    by_section["awaiting_author"].sort(key=lambda i: i["last_activity_at"], reverse=True)
+    for key in ("awaiting_author", "triaged"):
+        by_section[key].sort(key=lambda i: i["last_activity_at"], reverse=True)
 
     stale_desc = (f"No meaningful activity for {cfg['stale_days']}+ days "
                   "(in either direction).")
@@ -328,7 +371,7 @@ def render_html(items, cfg, now):
         body = (render_rows(rows, now, show_state=(key == "stale"))
                 + f'\n<tr class="empty-row"{empty_style}>'
                   '<td colspan="5" class="empty">Nothing here 🎉</td></tr>')
-        open_attr = "" if key == "awaiting_author" else " open"
+        open_attr = "" if key in ("awaiting_author", "triaged") else " open"
         sections_html.append(f"""
     <details class="section {key}" data-section="{key}"{open_attr}>
       <summary><h2>{title} <span class="count">{len(rows)}</span></h2><p>{desc}</p></summary>
@@ -376,6 +419,7 @@ def render_html(items, cfg, now):
   .card.needs_first_response .n {{ color: var(--bad); }}
   .card.awaiting_maintainer .n {{ color: var(--warn); }}
   .card.awaiting_author .n {{ color: var(--muted); }}
+  .card.triaged .n {{ color: var(--muted); }}
   .card.stale .n {{ color: var(--pending); }}
   details.section {{ background: var(--panel); border: 1px solid var(--border);
                      border-radius: 8px; margin-bottom: 20px; overflow: hidden; }}
@@ -426,6 +470,7 @@ def render_html(items, cfg, now):
       <div class="card needs_first_response" data-section="needs_first_response"><div class="n">{counts['needs_first_response']}</div><div class="l">needs first response</div></div>
       <div class="card awaiting_maintainer" data-section="awaiting_maintainer"><div class="n">{counts['awaiting_maintainer']}</div><div class="l">awaiting maintainer</div></div>
       <div class="card awaiting_author" data-section="awaiting_author"><div class="n">{counts['awaiting_author']}</div><div class="l">awaiting author</div></div>
+      <div class="card triaged" data-section="triaged"><div class="n">{counts['triaged']}</div><div class="l">triaged backlog</div></div>
       <div class="card stale" data-section="stale"><div class="n">{counts['stale']}</div><div class="l">stale ({cfg['stale_days']}d+)</div></div>
     </div>
     <div class="filter" role="group" aria-label="Filter by type">
@@ -460,7 +505,16 @@ def main():
     session.headers["Authorization"] = f"Bearer {token}"
 
     prs = fetch_all(session, PR_QUERY, variables, "pullRequests")
-    issues = fetch_all(session, ISSUE_QUERY, variables, "issues")
+    try:
+        issues = fetch_all(session, ISSUE_QUERY_TEMPLATE % PROJECT_FIELDS_FRAGMENT,
+                           variables, "issues")
+    except RuntimeError as e:
+        if "INSUFFICIENT_SCOPES" not in str(e):
+            raise
+        print("WARNING: token lacks read:project scope — priority/severity "
+              "project fields are invisible, so no issue is treated as triaged. "
+              "Add a PROJECTS_TOKEN secret with read:project to enable it.")
+        issues = fetch_all(session, ISSUE_QUERY_TEMPLATE % "", variables, "issues")
     print(f"Fetched {len(prs)} open PRs, {len(issues)} open issues")
 
     items = ([classify(n, True, maintainers, bots, stale_cutoff) for n in prs]

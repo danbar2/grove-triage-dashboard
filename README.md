@@ -19,11 +19,24 @@ Items are grouped by whose turn it is:
 | **Needs first response** | No maintainer has engaged yet | longest-waiting first |
 | **Awaiting maintainer** | Author/community acted last (replied, pushed, resolved threads) — the working queue | longest-waiting first |
 | **Awaiting author** | A maintainer responded last; ball is with the author | most recent first |
+| **Triaged backlog** | Issues with type (Bug/Feature/Task), Priority and Severity all set — already triaged, no first response needed | most recent first |
 | **Stale** | No meaningful activity for 80+ days (either direction) | oldest first |
 
 Classification rule: if the last non-bot actor is a maintainer (and not the
 item's own author), the item is *awaiting author*; otherwise it's *awaiting
 maintainer* (or *needs first response* if no maintainer has ever engaged).
+
+### Project fields (Priority / Severity)
+
+The type comes from GitHub's native issue type; Priority and Severity are read
+from the issue's GitHub Project (v2) single-select fields named `Priority` and
+`Severity` (case-insensitive, any linked project). Reading Projects v2 requires
+a token with the `read:project` scope, which neither the default Actions token
+nor a plain `repo` PAT has. To enable the check, add a repo secret named
+**`PROJECTS_TOKEN`** containing a PAT with `repo` + `read:project` scopes
+(Settings → Secrets and variables → Actions). Without it the dashboard still
+works — it just can't see those fields, logs a warning, and treats no issue as
+triaged.
 
 ## Configuration
 
