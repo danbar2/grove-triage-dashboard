@@ -520,6 +520,11 @@ def main():
     items = ([classify(n, True, maintainers, bots, stale_cutoff) for n in prs]
              + [classify(n, False, maintainers, bots, stale_cutoff) for n in issues])
 
+    if not any(it["priority"] or it["severity"] for it in items):
+        print("NOTE: no Priority/Severity project field values visible on any "
+              "issue. If the project does use them, the token cannot see the "
+              "project items — set a PROJECTS_TOKEN secret with read:project.")
+
     dist = Path(__file__).with_name("dist")
     dist.mkdir(exist_ok=True)
     (dist / "index.html").write_text(render_html(items, cfg, now))
