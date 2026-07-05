@@ -1,0 +1,34 @@
+# Grove triage dashboard configuration
+
+repo:
+  owner: ai-dynamo
+  name: grove
+
+# Days without meaningful activity before an item is moved to the Stale section
+stale_days: 80
+
+# GitHub logins treated as maintainers/team. If the last meaningful activity on
+# an item was by someone NOT on this list, the item needs maintainer attention.
+maintainers:
+  - danbar2
+  - shayasoolin
+  - shmuel-runai
+  - Ronkahn21
+  - gflarity
+  - oleg-kushniriov
+  - sanjaychatterjee
+  - enoodle
+  - unmarshall
+  - renormalize
+
+# Logins whose activity is ignored entirely (never counts as meaningful
+# activity). Any login ending in "[bot]" is also ignored automatically.
+bots:
+  - github-actions
+  - dependabot
+  - copilot
+  - chatgpt-codex-connector
+  - coderabbitai
+  - cursoragent
+  - copy-pr-bot
+  - nvidia-copy-pr-bot
