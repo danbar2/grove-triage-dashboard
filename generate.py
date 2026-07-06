@@ -7,9 +7,9 @@ review-thread replies — label/milestone/assignment churn is ignored),
 classifies each item by whose turn it is, and renders a Jira-style Kanban
 board (static HTML + client-side JS) plus a data.json into dist/.
 
-Editing (issue type / Priority) happens client-side: the page calls the
-GitHub API directly with a viewer-supplied PAT kept in localStorage. This
-script embeds the project/field/option node IDs the mutations need.
+The board is read-only: no viewer tokens, no GitHub operations from the
+page. Freshness comes from the scheduled workflow re-running this script
+every ~15 minutes with the repo's stored PROJECTS_TOKEN.
 """
 
 import json
@@ -318,7 +318,6 @@ PAGE_TEMPLATE = """<!doctype html>
   .seg button.active { background: var(--sel-bg); color: var(--blue); font-weight: 600; }
   .gear { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
           padding: 8px 14px; font: inherit; cursor: pointer; color: var(--subtle); }
-  .gear.tok { color: var(--green); border-color: var(--green); }
 
   .board { display: flex; gap: 16px; align-items: flex-start; padding: 28px 32px;
            overflow-x: auto; min-height: calc(100vh - 72px);
@@ -355,7 +354,7 @@ PAGE_TEMPLATE = """<!doctype html>
   .key:hover { text-decoration: underline; color: var(--blue); }
   .av { width: 22px; height: 22px; border-radius: 50%; }
 
-  .ticon { width: 20px; height: 20px; border-radius: 4px; border: none; padding: 0;
+  .ticon { width: 20px; height: 20px; border-radius: 4px; padding: 0;
            color: #fff; font-size: 12px; line-height: 20px; text-align: center;
            display: inline-block; font-weight: 700; }
   .ticon.pr { background: var(--purple); }
@@ -363,46 +362,12 @@ PAGE_TEMPLATE = """<!doctype html>
   .ticon.task { background: #388BFF; }
   .ticon.feature { background: #63BA3C; }
   .ticon.none { background: var(--card); color: var(--subtle); border: 1px dashed #8590A2; }
-  button.ticon { cursor: pointer; }
-  button.ticon:hover { outline: 2px solid #85B8FF; }
 
-  .prio { border: 1px solid transparent; border-radius: 4px; background: none;
-          font: inherit; font-size: 12px; font-weight: 700; padding: 1px 7px;
+  .prio { border-radius: 4px; font-size: 12px; font-weight: 700; padding: 1px 7px;
           color: var(--subtle); }
   .prio.p0 { color: var(--red); background: var(--red-bg); }
   .prio.p1 { color: var(--orange); background: var(--or-bg); }
   .prio.p2 { color: var(--yellow); background: var(--yel-bg); }
-  button.prio { cursor: pointer; }
-  button.prio:hover { outline: 2px solid #85B8FF; }
-  .prio.unset { border: 1px dashed #8590A2; }
-
-  .menu { position: absolute; background: var(--card); border: 1px solid var(--line);
-          border-radius: 8px; box-shadow: 0 8px 12px rgba(9,30,66,.15);
-          z-index: 20; min-width: 120px; padding: 4px; color: var(--text); }
-  .menu button { display: block; width: 100%; text-align: left; background: none;
-                 border: none; font: inherit; color: inherit; padding: 8px 12px;
-                 border-radius: 5px; cursor: pointer; }
-  .menu button:hover { background: var(--sel-bg); }
-
-  dialog { border: none; border-radius: 10px; box-shadow: 0 8px 28px rgba(9,30,66,.25);
-           max-width: 460px; padding: 20px; background: var(--card); color: var(--text); }
-  dialog::backdrop { background: rgba(9,30,66,.4); }
-  dialog h3 { margin: 0 0 8px; }
-  dialog p { color: var(--subtle); font-size: 13px; }
-  dialog input { width: 100%; padding: 8px 10px; border: 1px solid var(--line);
-                 border-radius: 6px; font: inherit; margin: 8px 0 14px; }
-  .dlgbtns { display: flex; gap: 8px; justify-content: flex-end; }
-  .dlgbtns button { font: inherit; padding: 7px 14px; border-radius: 6px;
-                    border: 1px solid var(--line); background: var(--card);
-                    color: var(--text); cursor: pointer; }
-  .dlgbtns button.primary { background: var(--blue); color: #fff; border-color: var(--blue); }
-
-  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
-           background: var(--text); color: #fff; border-radius: 8px; padding: 10px 18px;
-           font-size: 13px; opacity: 0; transition: opacity .25s; z-index: 30;
-           pointer-events: none; max-width: 80vw; }
-  #toast.show { opacity: 1; }
-  #toast.err { background: var(--red); }
 </style>
 </head>
 <body>
@@ -415,26 +380,9 @@ PAGE_TEMPLATE = """<!doctype html>
     <button data-filter="pr">PRs</button>
     <button data-filter="issue">Issues</button>
   </div>
-  <button class="gear" id="refresh" title="Fetch fresh data from GitHub now (needs token)">↻ Refresh</button>
   <button class="gear" id="theme" title="Toggle dark/light mode">🌙</button>
-  <button class="gear" id="gear">⚙ Token</button>
 </header>
 <div class="board" id="board"></div>
-
-<dialog id="tokendlg">
-  <h3>GitHub token for editing</h3>
-  <p>Setting type/priority calls the GitHub API directly from your browser.
-     Paste a <b>classic PAT</b> with <code>repo</code> + <code>project</code>
-     scopes, <b>SSO-authorized for ai-dynamo</b>, expiration &le; 1 year.
-     It is stored only in this browser (localStorage), never uploaded anywhere else.</p>
-  <input id="tokeninput" type="password" placeholder="ghp_…" autocomplete="off">
-  <div class="dlgbtns">
-    <button id="tokenclear">Clear</button>
-    <button id="tokenclose">Close</button>
-    <button id="tokensave" class="primary">Save</button>
-  </div>
-</dialog>
-<div id="toast"></div>
 
 <script>window.DASH = __PAYLOAD__;</script>
 <script>
@@ -442,10 +390,7 @@ PAGE_TEMPLATE = """<!doctype html>
   'use strict';
   var D = window.DASH;
   var filter = 'all';
-  var byNum = {};
-  D.items.forEach(function (it) { if (it.type === 'issue') byNum[it.number] = it; });
 
-  function token() { return localStorage.getItem('grove_dash_pat') || ''; }
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
@@ -481,21 +426,14 @@ PAGE_TEMPLATE = """<!doctype html>
     if (it.type === 'pr') return '<span class="ticon pr" title="Pull request">⇄</span>';
     var t = (it.issue_type || '').toLowerCase();
     var sym = {bug: '!', task: '✓', feature: '✦'}[t] || '+';
-    var cls = t || 'none';
-    return '<button class="ticon ' + cls + '" data-edit="type" data-num="' + it.number +
-           '" title="Type: ' + esc(it.issue_type || 'not set') + ' — click to change">' + sym + '</button>';
+    return '<span class="ticon ' + (t || 'none') + '" title="Type: ' +
+           esc(it.issue_type || 'not set') + '">' + sym + '</span>';
   }
 
   function prioBadge(it) {
-    if (it.type === 'pr') return '';
-    var p = it.priority;
-    var cls = p ? p.toLowerCase() : 'unset';
-    if (!D.project) {
-      return p ? '<span class="prio ' + esc(cls) + '">' + esc(p) + '</span>' : '';
-    }
-    return '<button class="prio ' + esc(cls) + '" data-edit="prio" data-num="' + it.number +
-           '" title="Priority: ' + esc(p || 'not set') + ' — click to change">' +
-           esc(p || '—') + '</button>';
+    if (it.type === 'pr' || !it.priority) return '';
+    return '<span class="prio ' + esc(it.priority.toLowerCase()) + '" title="Priority">' +
+           esc(it.priority) + '</span>';
   }
 
   function cardHTML(it) {
@@ -545,16 +483,6 @@ PAGE_TEMPLATE = """<!doctype html>
     segButtons.forEach(function (x) { x.classList.toggle('active', x.dataset.filter === initial); });
   }
 
-  // ---- toast ----
-  var toastTimer = null;
-  function toast(msg, isErr) {
-    var t = document.getElementById('toast');
-    t.textContent = msg;
-    t.className = 'show' + (isErr ? ' err' : '');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { t.className = ''; }, isErr ? 6000 : 2500);
-  }
-
   // ---- theme ----
   var themeBtn = document.getElementById('theme');
   function applyTheme(t) {
@@ -571,270 +499,15 @@ PAGE_TEMPLATE = """<!doctype html>
     applyTheme(theme);
   });
 
-  // ---- token dialog ----
-  var dlg = document.getElementById('tokendlg');
-  var gear = document.getElementById('gear');
-  function refreshGear() {
-    gear.classList.toggle('tok', !!token());
-    gear.textContent = token() ? '⚙ Token ✓' : '⚙ Token';
-  }
-  gear.addEventListener('click', function () {
-    document.getElementById('tokeninput').value = token();
-    dlg.showModal();
-  });
-  document.getElementById('tokensave').addEventListener('click', function () {
-    localStorage.setItem('grove_dash_pat', document.getElementById('tokeninput').value.trim());
-    refreshGear(); dlg.close(); toast('Token saved in this browser');
-  });
-  document.getElementById('tokenclear').addEventListener('click', function () {
-    localStorage.removeItem('grove_dash_pat');
-    document.getElementById('tokeninput').value = '';
-    refreshGear(); toast('Token cleared');
-  });
-  document.getElementById('tokenclose').addEventListener('click', function () { dlg.close(); });
-  refreshGear();
-
-  // ---- GitHub API ----
-  function ghREST(method, path, body) {
-    return fetch('https://api.github.com/' + path, {
-      method: method,
-      headers: {Authorization: 'Bearer ' + token(), Accept: 'application/vnd.github+json'},
-      body: JSON.stringify(body)
-    }).then(function (res) {
-      if (res.ok) return res.json();
-      return res.json().catch(function () { return {}; }).then(function (j) {
-        throw new Error(j.message || ('HTTP ' + res.status));
-      });
-    });
-  }
-  function ghGQL(query, variables) {
-    return fetch('https://api.github.com/graphql', {
-      method: 'POST',
-      headers: {Authorization: 'Bearer ' + token()},
-      body: JSON.stringify({query: query, variables: variables})
-    }).then(function (res) { return res.json().then(function (j) {
-      if (j.errors && j.errors.length) throw new Error(j.errors[0].message);
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      return j.data;
-    }); });
-  }
-
-  function retriage(it) {
-    var vals = Object.assign({issue_type: it.issue_type}, it.project_fields || {},
-                             {priority: it.priority});
-    if (it.section === 'needs_first_response' && D.triaged_when_set.length &&
-        D.triaged_when_set.every(function (f) { return vals[f]; })) {
-      it.section = 'triaged'; it.state = 'triaged';
-    }
-  }
-
-  function setType(it, t) {
-    return ghREST('PATCH', 'repos/' + D.repo.owner + '/' + D.repo.name + '/issues/' + it.number,
-                  {type: t})
-      .then(function () { it.issue_type = t; retriage(it); render(); });
-  }
-
-  function setPriority(it, optionId, optionName) {
-    var p = D.project;
-    var ensureItem = it.project_item_id
-      ? Promise.resolve(it.project_item_id)
-      : ghGQL('mutation($p:ID!,$c:ID!){addProjectV2ItemById(input:{projectId:$p,contentId:$c}){item{id}}}',
-              {p: p.id, c: it.id})
-          .then(function (d) { it.project_item_id = d.addProjectV2ItemById.item.id;
-                               return it.project_item_id; });
-    return ensureItem.then(function (itemId) {
-      return ghGQL('mutation($p:ID!,$i:ID!,$f:ID!,$o:String!){updateProjectV2ItemFieldValue(' +
-                   'input:{projectId:$p,itemId:$i,fieldId:$f,value:{singleSelectOptionId:$o}})' +
-                   '{projectV2Item{id}}}',
-                   {p: p.id, i: itemId, f: p.priority_field.id, o: optionId});
-    }).then(function () {
-      it.priority = optionName;
-      it.project_fields = it.project_fields || {};
-      it.project_fields.priority = optionName;
-      retriage(it); render();
-    });
-  }
-
-  // ---- edit menus ----
-  var menuEl = null;
-  function closeMenu() { if (menuEl) { menuEl.remove(); menuEl = null; } }
-  document.addEventListener('click', function (e) {
-    var btn = e.target.closest('[data-edit]');
-    if (!btn) { if (!e.target.closest('.menu')) closeMenu(); return; }
-    var it = byNum[btn.dataset.num];
-    if (!it) return;
-    closeMenu();
-    if (!token()) { dlg.showModal(); return; }
-    var kind = btn.dataset.edit;
-    var opts = kind === 'type'
-      ? D.types.map(function (t) { return {label: t, val: t}; })
-      : D.project.priority_field.options.map(function (o) { return {label: o.name, val: o.id}; });
-    menuEl = document.createElement('div');
-    menuEl.className = 'menu';
-    menuEl.innerHTML = opts.map(function (o) {
-      return '<button data-val="' + esc(o.val) + '">' + esc(o.label) + '</button>';
-    }).join('');
-    document.body.appendChild(menuEl);
-    var r = btn.getBoundingClientRect();
-    menuEl.style.left = (r.left + window.scrollX) + 'px';
-    menuEl.style.top = (r.bottom + window.scrollY + 4) + 'px';
-    menuEl.addEventListener('click', function (ev) {
-      var b = ev.target.closest('button');
-      if (!b) return;
-      var val = b.dataset.val, label = b.textContent;
-      closeMenu();
-      var op = kind === 'type' ? setType(it, val) : setPriority(it, val, label);
-      op.then(function () { toast('#' + it.number + ' → ' + label); })
-        .catch(function (err) { toast('#' + it.number + ' failed: ' + err.message, true); });
-    });
-  });
-
   // ---- header sub ----
-  function renderSub() {
-    var gen = new Date(D.generated_at);
-    document.getElementById('sub').innerHTML =
-      '<a href="https://github.com/' + D.repo.owner + '/' + D.repo.name + '" target="_blank" rel="noopener">' +
-      D.repo.owner + '/' + D.repo.name + '</a> · ' +
-      (D.live ? '🟢 live, fetched ' : 'snapshot from ') + relTime(D.generated_at) +
-      ' <span title="' + gen.toISOString() + '">(' + gen.toUTCString().slice(5, 22) + ' UTC)</span>' +
-      ' · <a href="data.json">data.json</a>' +
-      (D.project ? '' : ' · <span style="color:var(--orange)">priority editing unavailable</span>');
-  }
-
-  // ---- live on-demand fetch (uses the viewer token, straight from GitHub) ----
-  function isBot(login) {
-    if (!login) return false;
-    var l = login.toLowerCase();
-    return D.bots.indexOf(l) >= 0 || l.slice(-5) === '[bot]';
-  }
-
-  async function gqlPaged(query, path) {
-    var nodes = [], cursor = null;
-    for (;;) {
-      var d = await ghGQL(query, {owner: D.repo.owner, name: D.repo.name, cursor: cursor});
-      var conn = d.repository[path];
-      nodes = nodes.concat(conn.nodes);
-      if (!conn.pageInfo.hasNextPage) return nodes;
-      cursor = conn.pageInfo.endCursor;
-    }
-  }
-
-  function collectEvents(node, isPr) {
-    var author = (node.author && node.author.login) || 'ghost';
-    var ev = [[node.createdAt, author, 'opened']];
-    node.timelineItems.nodes.forEach(function (item) {
-      var t = item.__typename;
-      if (t === 'IssueComment') {
-        ev.push([item.createdAt, item.author && item.author.login, 'commented']);
-      } else if (t === 'PullRequestReview') {
-        var desc = {APPROVED: 'approved', CHANGES_REQUESTED: 'requested changes',
-                    COMMENTED: 'reviewed', DISMISSED: 'review dismissed'}[item.state] || 'reviewed';
-        ev.push([item.createdAt, item.author && item.author.login, desc]);
-      } else if (t === 'PullRequestCommit') {
-        var u = item.commit.author && item.commit.author.user && item.commit.author.user.login;
-        ev.push([item.commit.committedDate, u || author, 'pushed a commit']);
-      } else if (t === 'HeadRefForcePushedEvent') {
-        ev.push([item.createdAt, item.actor && item.actor.login, 'force-pushed']);
-      } else if (t === 'ReadyForReviewEvent') {
-        ev.push([item.createdAt, item.actor && item.actor.login, 'marked ready for review']);
-      }
-    });
-    if (isPr && node.reviewThreads) {
-      node.reviewThreads.nodes.forEach(function (th) {
-        th.comments.nodes.forEach(function (c) {
-          ev.push([c.createdAt, c.author && c.author.login, 'replied in a review thread']);
-        });
-      });
-    }
-    return ev.filter(function (e) { return !isBot(e[1]); });
-  }
-
-  function classifyNode(node, isPr) {
-    var author = (node.author && node.author.login) || 'ghost';
-    var ev = collectEvents(node, isPr);
-    if (!ev.length) ev = [[node.createdAt, author, 'opened']];
-    ev.sort(function (a, b) { return new Date(a[0]) - new Date(b[0]); });
-    var last = ev[ev.length - 1];
-    function isM(l) { return !!l && D.maintainers.indexOf(l.toLowerCase()) >= 0; }
-    var engaged = ev.some(function (e) {
-      return isM(e[1]) && e[1].toLowerCase() !== author.toLowerCase();
-    });
-    var state;
-    if (isM(last[1]) && last[1].toLowerCase() !== author.toLowerCase()) state = 'awaiting_author';
-    else if (!engaged) state = 'needs_first_response';
-    else state = 'awaiting_maintainer';
-
-    var issueType = (node.issueType && node.issueType.name) || null;
-    var fields = {};
-    var projectItemId = null;
-    ((node.projectItems && node.projectItems.nodes) || []).forEach(function (pi) {
-      if (D.project && pi.project && pi.project.id === D.project.id) projectItemId = pi.id;
-      pi.fieldValues.nodes.forEach(function (fv) {
-        if (fv && fv.name && fv.field && fv.field.name) {
-          fields[fv.field.name.toLowerCase()] = fv.name;
-        }
-      });
-    });
-    var vals = Object.assign({issue_type: issueType}, fields);
-    if (state === 'needs_first_response' && D.triaged_when_set.length &&
-        D.triaged_when_set.every(function (f) { return vals[f]; })) state = 'triaged';
-
-    var section = (Date.now() - new Date(last[0]).getTime() > D.stale_days * 86400000)
-      ? 'stale' : state;
-
-    var unresolved = null, ci = null;
-    if (isPr) {
-      unresolved = node.reviewThreads.nodes.filter(function (t) { return !t.isResolved; }).length;
-      var cs = node.commits.nodes;
-      if (cs.length && cs[0].commit.statusCheckRollup) ci = cs[0].commit.statusCheckRollup.state;
-    }
-    return {
-      type: isPr ? 'pr' : 'issue', id: node.id, number: node.number, title: node.title,
-      url: node.url, author: author, created_at: node.createdAt, is_draft: !!node.isDraft,
-      issue_type: issueType, priority: fields.priority || null,
-      severity: fields.severity || null, project_fields: fields,
-      project_item_id: projectItemId, review_decision: node.reviewDecision || null,
-      ci_state: ci, unresolved_threads: unresolved,
-      last_activity_at: new Date(last[0]).toISOString(),
-      last_activity_by: last[1] || 'ghost', last_activity_desc: last[2],
-      state: state, section: section
-    };
-  }
-
-  var refreshBtn = document.getElementById('refresh');
-  async function refreshData(auto) {
-    if (!token()) { if (!auto) dlg.showModal(); return; }
-    refreshBtn.disabled = true;
-    refreshBtn.textContent = '↻ Refreshing…';
-    try {
-      var prs = await gqlPaged(D.queries.prs, 'pullRequests');
-      var issues, hasProj = true;
-      try {
-        issues = await gqlPaged(D.queries.issues_full, 'issues');
-      } catch (e) {
-        hasProj = false;
-        issues = await gqlPaged(D.queries.issues_basic, 'issues');
-      }
-      D.items = prs.map(function (n) { return classifyNode(n, true); })
-        .concat(issues.map(function (n) { return classifyNode(n, false); }));
-      byNum = {};
-      D.items.forEach(function (it) { if (it.type === 'issue') byNum[it.number] = it; });
-      D.generated_at = new Date().toISOString();
-      D.live = true;
-      render(); renderSub();
-      if (!auto) toast('Refreshed from GitHub' +
-        (hasProj ? '' : ' — token cannot see project fields (needs project scope)'));
-    } catch (err) {
-      toast('Refresh failed: ' + err.message, true);
-    }
-    refreshBtn.disabled = false;
-    refreshBtn.textContent = '↻ Refresh';
-  }
-  refreshBtn.addEventListener('click', function () { refreshData(false); });
+  var gen = new Date(D.generated_at);
+  document.getElementById('sub').innerHTML =
+    '<a href="https://github.com/' + D.repo.owner + '/' + D.repo.name + '" target="_blank" rel="noopener">' +
+    D.repo.owner + '/' + D.repo.name + '</a> · updated ' + relTime(D.generated_at) +
+    ' <span title="' + gen.toISOString() + '">(' + gen.toUTCString().slice(5, 22) + ' UTC)</span>' +
+    ' · auto-refreshes every ~15 min · <a href="data.json">data.json</a>';
 
   render();
-  renderSub();
-  refreshData(true);
 })();
 </script>
 </body>
@@ -849,21 +522,15 @@ def render_html(items, cfg, now, project_meta, triaged_when_set):
         "generated_at": now.isoformat(),
         "repo": cfg["repo"],
         "stale_days": cfg["stale_days"],
-        "triaged_when_set": triaged_when_set,
         "sections": [{"key": k, "title": t,
                       "desc": (stale_desc if k == "stale" else d)}
                      for k, t, d in SECTIONS],
-        "types": ISSUE_TYPES,
-        "project": project_meta,
-        "maintainers": sorted(m.lower() for m in cfg["maintainers"]),
-        "bots": sorted(b.lower() for b in cfg.get("bots", [])),
-        "queries": {"prs": PR_QUERY,
-                    "issues_full": ISSUE_QUERY_TEMPLATE % PROJECT_FIELDS_FRAGMENT,
-                    "issues_basic": ISSUE_QUERY_TEMPLATE % ""},
         "items": items,
     }
     blob = json.dumps(payload).replace("</", "<\\/")
     return PAGE_TEMPLATE.replace("__PAYLOAD__", blob)
+
+
 
 
 def main():

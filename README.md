@@ -2,8 +2,9 @@
 
 A Jira-style Kanban board for triaging
 [ai-dynamo/grove](https://github.com/ai-dynamo/grove) issues and PRs, rebuilt
-twice a day (06:00 / 18:00 UTC) by GitHub Actions and published on GitHub
-Pages.
+every ~15 minutes by GitHub Actions (using the repo's stored `PROJECTS_TOKEN`)
+and published on GitHub Pages. Read-only: refreshing the page always serves
+the latest snapshot — no viewer tokens, no editing.
 
 **Board:** https://danbar2.github.io/grove-triage-dashboard/
 
@@ -28,25 +29,15 @@ Classification rule: if the last non-bot actor is a maintainer (and not the
 item's own author), the item is *awaiting author*; otherwise it's *awaiting
 maintainer* (or *needs first response* if no maintainer has ever engaged).
 
-## On-demand data
+## Data freshness
 
-The page ships with a snapshot baked in at build time, but if you have a token
-set (see below) it **fetches live data straight from the GitHub API in your
-browser** — automatically on page load, and any time you click **↻ Refresh**
-(takes a few seconds). The header shows whether you're looking at 🟢 live data
-or the build-time snapshot. The twice-daily rebuild remains as the fallback
-for viewers without a token.
-
-## Editing from the board
-
-On issue cards, the **type icon** (Task/Bug/Feature) and the **priority badge**
-(P0/P1/P2) are clickable and update GitHub directly — setting both moves a card
-from *Needs first response* to *Triaged backlog* on the spot. Editing calls the
-GitHub API from your browser, so it needs a token: click **⚙ Token** in the
-header and paste a classic PAT with `repo` + `project` scopes, SSO-authorized
-for `ai-dynamo`, expiration ≤ 1 year. The token is stored only in your
-browser's localStorage. Issues not yet on the project are added to
-"Grove - New" automatically when you set a priority.
+The board is a static snapshot regenerated every ~15 minutes by the scheduled
+workflow (GitHub Actions cron is best-effort, so expect 15–25 minutes in
+practice). The header shows the snapshot's age. The token used for fetching
+lives only in the repo's Actions secrets — the page itself contains no
+credentials and performs no GitHub operations. For an immediate rebuild, run
+the workflow manually (Actions tab → "Run workflow", or
+`gh workflow run dashboard.yml -R danbar2/grove-triage-dashboard`).
 
 ### Project fields (Priority / Severity)
 

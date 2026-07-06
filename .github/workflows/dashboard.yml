@@ -2,7 +2,7 @@ name: Build & deploy triage dashboard
 
 on:
   schedule:
-    - cron: "0 6,18 * * *"   # twice a day, UTC
+    - cron: "*/15 * * * *"   # every ~15 min (Actions cron is best-effort)
   workflow_dispatch:
   push:
     branches: [main]
