@@ -500,14 +500,30 @@ PAGE_TEMPLATE = """<!doctype html>
   });
 
   // ---- header sub ----
-  var gen = new Date(D.generated_at);
-  document.getElementById('sub').innerHTML =
-    '<a href="https://github.com/' + D.repo.owner + '/' + D.repo.name + '" target="_blank" rel="noopener">' +
-    D.repo.owner + '/' + D.repo.name + '</a> · updated ' + relTime(D.generated_at) +
-    ' <span title="' + gen.toISOString() + '">(' + gen.toUTCString().slice(5, 22) + ' UTC)</span>' +
-    ' · auto-refreshes every ~15 min · <a href="data.json">data.json</a>';
+  function renderSub() {
+    var gen = new Date(D.generated_at);
+    document.getElementById('sub').innerHTML =
+      '<a href="https://github.com/' + D.repo.owner + '/' + D.repo.name + '" target="_blank" rel="noopener">' +
+      D.repo.owner + '/' + D.repo.name + '</a> · updated ' + relTime(D.generated_at) +
+      ' <span title="' + gen.toISOString() + '">(' + gen.toUTCString().slice(5, 22) + ' UTC)</span>' +
+      ' · auto-refreshes every ~15 min · <a href="data.json">data.json</a>';
+  }
 
   render();
+  renderSub();
+
+  // The Pages CDN caches this page for 10 minutes; a cache-busted data.json
+  // fetch on every load makes a plain refresh always show the newest snapshot.
+  fetch('data.json?_=' + Date.now(), {cache: 'no-store'})
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      if (d.generated_at && d.generated_at > D.generated_at) {
+        D.items = d.items;
+        D.generated_at = d.generated_at;
+        render(); renderSub();
+      }
+    })
+    .catch(function () {});
 })();
 </script>
 </body>
