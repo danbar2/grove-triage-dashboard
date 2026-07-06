@@ -1,10 +1,11 @@
-# Grove triage dashboard
+# Grove triage board
 
-A static dashboard for triaging [ai-dynamo/grove](https://github.com/ai-dynamo/grove)
-issues and PRs, rebuilt twice a day (06:00 / 18:00 UTC) by GitHub Actions and
-published on GitHub Pages.
+A Jira-style Kanban board for triaging
+[ai-dynamo/grove](https://github.com/ai-dynamo/grove) issues and PRs, rebuilt
+twice a day (06:00 / 18:00 UTC) by GitHub Actions and published on GitHub
+Pages.
 
-**Dashboard:** https://danbar2.github.io/grove-triage-dashboard/
+**Board:** https://danbar2.github.io/grove-triage-dashboard/
 
 ## What it shows
 
@@ -12,10 +13,10 @@ For every open issue/PR it computes the **last meaningful activity** — comment
 reviews, commits, force-pushes, review-thread replies, ready-for-review. Label,
 milestone, assignment, and project churn is ignored, as is bot activity.
 
-Items are grouped by whose turn it is; every section is sorted by last
-meaningful activity, newest first:
+Each stage is a column; cards are sorted by last meaningful activity, newest
+first:
 
-| Section | Meaning |
+| Column | Meaning |
 |---|---|
 | **Needs first response** | No maintainer has engaged yet |
 | **Awaiting maintainer** | Author/community acted last (replied, pushed, resolved threads) — the working queue |
@@ -26,6 +27,17 @@ meaningful activity, newest first:
 Classification rule: if the last non-bot actor is a maintainer (and not the
 item's own author), the item is *awaiting author*; otherwise it's *awaiting
 maintainer* (or *needs first response* if no maintainer has ever engaged).
+
+## Editing from the board
+
+On issue cards, the **type icon** (Task/Bug/Feature) and the **priority badge**
+(P0/P1/P2) are clickable and update GitHub directly — setting both moves a card
+from *Needs first response* to *Triaged backlog* on the spot. Editing calls the
+GitHub API from your browser, so it needs a token: click **⚙ Token** in the
+header and paste a classic PAT with `repo` + `project` scopes, SSO-authorized
+for `ai-dynamo`, expiration ≤ 1 year. The token is stored only in your
+browser's localStorage. Issues not yet on the project are added to
+"Grove - New" automatically when you set a priority.
 
 ### Project fields (Priority / Severity)
 
