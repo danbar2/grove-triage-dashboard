@@ -415,6 +415,7 @@ PAGE_TEMPLATE = """<!doctype html>
     <button data-filter="pr">PRs</button>
     <button data-filter="issue">Issues</button>
   </div>
+  <button class="gear" id="refresh" title="Fetch fresh data from GitHub now (needs token)">↻ Refresh</button>
   <button class="gear" id="theme" title="Toggle dark/light mode">🌙</button>
   <button class="gear" id="gear">⚙ Token</button>
 </header>
@@ -458,6 +459,7 @@ PAGE_TEMPLATE = """<!doctype html>
     if (days >= 1) return days + 'd ago';
     var h = Math.floor(s / 3600);
     if (h >= 1) return h + 'h ago';
+    if (s < 45) return 'just now';
     return Math.max(1, Math.floor(s / 60)) + 'm ago';
   }
 
@@ -688,15 +690,151 @@ PAGE_TEMPLATE = """<!doctype html>
   });
 
   // ---- header sub ----
-  var gen = new Date(D.generated_at);
-  document.getElementById('sub').innerHTML =
-    '<a href="https://github.com/' + D.repo.owner + '/' + D.repo.name + '" target="_blank" rel="noopener">' +
-    D.repo.owner + '/' + D.repo.name + '</a> · updated ' + relTime(D.generated_at) +
-    ' <span title="' + gen.toISOString() + '">(' + gen.toUTCString().slice(5, 22) + ' UTC)</span>' +
-    ' · refreshes 06:00/18:00 UTC · <a href="data.json">data.json</a>' +
-    (D.project ? '' : ' · <span style="color:#B65C02">priority editing unavailable in this build</span>');
+  function renderSub() {
+    var gen = new Date(D.generated_at);
+    document.getElementById('sub').innerHTML =
+      '<a href="https://github.com/' + D.repo.owner + '/' + D.repo.name + '" target="_blank" rel="noopener">' +
+      D.repo.owner + '/' + D.repo.name + '</a> · ' +
+      (D.live ? '🟢 live, fetched ' : 'snapshot from ') + relTime(D.generated_at) +
+      ' <span title="' + gen.toISOString() + '">(' + gen.toUTCString().slice(5, 22) + ' UTC)</span>' +
+      ' · <a href="data.json">data.json</a>' +
+      (D.project ? '' : ' · <span style="color:var(--orange)">priority editing unavailable</span>');
+  }
+
+  // ---- live on-demand fetch (uses the viewer token, straight from GitHub) ----
+  function isBot(login) {
+    if (!login) return false;
+    var l = login.toLowerCase();
+    return D.bots.indexOf(l) >= 0 || l.slice(-5) === '[bot]';
+  }
+
+  async function gqlPaged(query, path) {
+    var nodes = [], cursor = null;
+    for (;;) {
+      var d = await ghGQL(query, {owner: D.repo.owner, name: D.repo.name, cursor: cursor});
+      var conn = d.repository[path];
+      nodes = nodes.concat(conn.nodes);
+      if (!conn.pageInfo.hasNextPage) return nodes;
+      cursor = conn.pageInfo.endCursor;
+    }
+  }
+
+  function collectEvents(node, isPr) {
+    var author = (node.author && node.author.login) || 'ghost';
+    var ev = [[node.createdAt, author, 'opened']];
+    node.timelineItems.nodes.forEach(function (item) {
+      var t = item.__typename;
+      if (t === 'IssueComment') {
+        ev.push([item.createdAt, item.author && item.author.login, 'commented']);
+      } else if (t === 'PullRequestReview') {
+        var desc = {APPROVED: 'approved', CHANGES_REQUESTED: 'requested changes',
+                    COMMENTED: 'reviewed', DISMISSED: 'review dismissed'}[item.state] || 'reviewed';
+        ev.push([item.createdAt, item.author && item.author.login, desc]);
+      } else if (t === 'PullRequestCommit') {
+        var u = item.commit.author && item.commit.author.user && item.commit.author.user.login;
+        ev.push([item.commit.committedDate, u || author, 'pushed a commit']);
+      } else if (t === 'HeadRefForcePushedEvent') {
+        ev.push([item.createdAt, item.actor && item.actor.login, 'force-pushed']);
+      } else if (t === 'ReadyForReviewEvent') {
+        ev.push([item.createdAt, item.actor && item.actor.login, 'marked ready for review']);
+      }
+    });
+    if (isPr && node.reviewThreads) {
+      node.reviewThreads.nodes.forEach(function (th) {
+        th.comments.nodes.forEach(function (c) {
+          ev.push([c.createdAt, c.author && c.author.login, 'replied in a review thread']);
+        });
+      });
+    }
+    return ev.filter(function (e) { return !isBot(e[1]); });
+  }
+
+  function classifyNode(node, isPr) {
+    var author = (node.author && node.author.login) || 'ghost';
+    var ev = collectEvents(node, isPr);
+    if (!ev.length) ev = [[node.createdAt, author, 'opened']];
+    ev.sort(function (a, b) { return new Date(a[0]) - new Date(b[0]); });
+    var last = ev[ev.length - 1];
+    function isM(l) { return !!l && D.maintainers.indexOf(l.toLowerCase()) >= 0; }
+    var engaged = ev.some(function (e) {
+      return isM(e[1]) && e[1].toLowerCase() !== author.toLowerCase();
+    });
+    var state;
+    if (isM(last[1]) && last[1].toLowerCase() !== author.toLowerCase()) state = 'awaiting_author';
+    else if (!engaged) state = 'needs_first_response';
+    else state = 'awaiting_maintainer';
+
+    var issueType = (node.issueType && node.issueType.name) || null;
+    var fields = {};
+    var projectItemId = null;
+    ((node.projectItems && node.projectItems.nodes) || []).forEach(function (pi) {
+      if (D.project && pi.project && pi.project.id === D.project.id) projectItemId = pi.id;
+      pi.fieldValues.nodes.forEach(function (fv) {
+        if (fv && fv.name && fv.field && fv.field.name) {
+          fields[fv.field.name.toLowerCase()] = fv.name;
+        }
+      });
+    });
+    var vals = Object.assign({issue_type: issueType}, fields);
+    if (state === 'needs_first_response' && D.triaged_when_set.length &&
+        D.triaged_when_set.every(function (f) { return vals[f]; })) state = 'triaged';
+
+    var section = (Date.now() - new Date(last[0]).getTime() > D.stale_days * 86400000)
+      ? 'stale' : state;
+
+    var unresolved = null, ci = null;
+    if (isPr) {
+      unresolved = node.reviewThreads.nodes.filter(function (t) { return !t.isResolved; }).length;
+      var cs = node.commits.nodes;
+      if (cs.length && cs[0].commit.statusCheckRollup) ci = cs[0].commit.statusCheckRollup.state;
+    }
+    return {
+      type: isPr ? 'pr' : 'issue', id: node.id, number: node.number, title: node.title,
+      url: node.url, author: author, created_at: node.createdAt, is_draft: !!node.isDraft,
+      issue_type: issueType, priority: fields.priority || null,
+      severity: fields.severity || null, project_fields: fields,
+      project_item_id: projectItemId, review_decision: node.reviewDecision || null,
+      ci_state: ci, unresolved_threads: unresolved,
+      last_activity_at: new Date(last[0]).toISOString(),
+      last_activity_by: last[1] || 'ghost', last_activity_desc: last[2],
+      state: state, section: section
+    };
+  }
+
+  var refreshBtn = document.getElementById('refresh');
+  async function refreshData(auto) {
+    if (!token()) { if (!auto) dlg.showModal(); return; }
+    refreshBtn.disabled = true;
+    refreshBtn.textContent = '↻ Refreshing…';
+    try {
+      var prs = await gqlPaged(D.queries.prs, 'pullRequests');
+      var issues, hasProj = true;
+      try {
+        issues = await gqlPaged(D.queries.issues_full, 'issues');
+      } catch (e) {
+        hasProj = false;
+        issues = await gqlPaged(D.queries.issues_basic, 'issues');
+      }
+      D.items = prs.map(function (n) { return classifyNode(n, true); })
+        .concat(issues.map(function (n) { return classifyNode(n, false); }));
+      byNum = {};
+      D.items.forEach(function (it) { if (it.type === 'issue') byNum[it.number] = it; });
+      D.generated_at = new Date().toISOString();
+      D.live = true;
+      render(); renderSub();
+      if (!auto) toast('Refreshed from GitHub' +
+        (hasProj ? '' : ' — token cannot see project fields (needs project scope)'));
+    } catch (err) {
+      toast('Refresh failed: ' + err.message, true);
+    }
+    refreshBtn.disabled = false;
+    refreshBtn.textContent = '↻ Refresh';
+  }
+  refreshBtn.addEventListener('click', function () { refreshData(false); });
 
   render();
+  renderSub();
+  refreshData(true);
 })();
 </script>
 </body>
@@ -717,6 +855,11 @@ def render_html(items, cfg, now, project_meta, triaged_when_set):
                      for k, t, d in SECTIONS],
         "types": ISSUE_TYPES,
         "project": project_meta,
+        "maintainers": sorted(m.lower() for m in cfg["maintainers"]),
+        "bots": sorted(b.lower() for b in cfg.get("bots", [])),
+        "queries": {"prs": PR_QUERY,
+                    "issues_full": ISSUE_QUERY_TEMPLATE % PROJECT_FIELDS_FRAGMENT,
+                    "issues_basic": ISSUE_QUERY_TEMPLATE % ""},
         "items": items,
     }
     blob = json.dumps(payload).replace("</", "<\\/")

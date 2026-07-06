@@ -28,6 +28,15 @@ Classification rule: if the last non-bot actor is a maintainer (and not the
 item's own author), the item is *awaiting author*; otherwise it's *awaiting
 maintainer* (or *needs first response* if no maintainer has ever engaged).
 
+## On-demand data
+
+The page ships with a snapshot baked in at build time, but if you have a token
+set (see below) it **fetches live data straight from the GitHub API in your
+browser** — automatically on page load, and any time you click **↻ Refresh**
+(takes a few seconds). The header shows whether you're looking at 🟢 live data
+or the build-time snapshot. The twice-daily rebuild remains as the fallback
+for viewers without a token.
+
 ## Editing from the board
 
 On issue cards, the **type icon** (Task/Bug/Feature) and the **priority badge**
