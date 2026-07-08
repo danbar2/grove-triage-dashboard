@@ -1,4 +1,4 @@
-name: Build & deploy triage dashboard
+name: Build & deploy triage boards
 
 on:
   schedule:
@@ -31,7 +31,7 @@ jobs:
 
       - run: pip install requests pyyaml
 
-      - name: Generate dashboard
+      - name: Generate boards
         run: python generate.py
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
