@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Generate the Grove triage board.
+"""Generate the triage boards for every project in config.yaml.
 
 Fetches open issues/PRs from GitHub via GraphQL, computes the last
 *meaningful* activity per item (comments, reviews, commits, force-pushes,
 review-thread replies — label/milestone/assignment churn is ignored),
 classifies each item by whose turn it is, and renders a Jira-style Kanban
-board (static HTML + client-side JS) plus a data.json into dist/.
+board (static HTML + client-side JS) plus a data.json per project into
+dist/<slug>/, with an index of all boards at dist/index.html.
+
+Usage: generate.py [slug ...] — build only the named projects (default: all).
 
 The board is read-only: no viewer tokens, no GitHub operations from the
 page. Freshness comes from the scheduled workflow re-running this script
@@ -275,13 +278,8 @@ def classify(node, is_pr, maintainers, bots, stale_cutoff, triaged_when_set):
     }
 
 
-PAGE_TEMPLATE = """<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grove triage board</title>
-<style>
+# Shared by the board pages and the root index page.
+BASE_CSS = """
   :root {
     --text: #172B4D; --subtle: #626F86; --bg: #F7F8F9; --colbg: #F1F2F4;
     --card: #FFFFFF; --hover: #FAFBFC; --line: #DCDFE4; --blue: #0C66E4;
@@ -304,7 +302,25 @@ PAGE_TEMPLATE = """<!doctype html>
          font: 15px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
          transition: background .2s, color .2s; }
   a { color: var(--blue); text-decoration: none; }
+  .cnt { background: var(--mut-bg); border-radius: 10px; padding: 1px 9px; font-size: 12px; }
+  .cnt.needs_first_response { background: var(--red-bg); color: var(--red); }
+  .cnt.awaiting_maintainer { background: var(--or-bg); color: var(--orange); }
+  .cnt.awaiting_author { background: var(--mut-bg); color: var(--subtle); }
+  .cnt.triaged { background: var(--grn-bg); color: var(--green); }
+  .cnt.stale { background: var(--pur-bg); color: var(--purple); }
+"""
 
+# The theme toggle on board pages and the root index share this key, so the
+# choice carries across all boards.
+THEME_KEY = "triage_dash_theme"
+
+PAGE_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>__BASE_CSS__
   header { background: var(--card); border-bottom: 1px solid var(--line);
            padding: 16px 28px; display: flex; align-items: center; gap: 16px;
            flex-wrap: wrap; position: sticky; top: 0; z-index: 5; }
@@ -326,12 +342,6 @@ PAGE_TEMPLATE = """<!doctype html>
   .colhead { display: flex; justify-content: space-between; align-items: center;
              padding: 14px 16px 8px; font-size: 12.5px; font-weight: 600;
              color: var(--subtle); text-transform: uppercase; letter-spacing: .03em; }
-  .cnt { background: var(--mut-bg); border-radius: 10px; padding: 1px 9px; font-size: 12px; }
-  .cnt.needs_first_response { background: var(--red-bg); color: var(--red); }
-  .cnt.awaiting_maintainer { background: var(--or-bg); color: var(--orange); }
-  .cnt.awaiting_author { background: var(--mut-bg); color: var(--subtle); }
-  .cnt.triaged { background: var(--grn-bg); color: var(--green); }
-  .cnt.stale { background: var(--pur-bg); color: var(--purple); }
   .cards { display: flex; flex-direction: column; gap: 10px; padding: 6px 10px 12px; }
   .empty { color: var(--subtle); text-align: center; padding: 20px 0 26px; font-size: 13px; }
 
@@ -372,7 +382,7 @@ PAGE_TEMPLATE = """<!doctype html>
 </head>
 <body>
 <header>
-  <h1>Grove triage board</h1>
+  <h1>__TITLE__</h1>
   <div class="sub" id="sub"></div>
   <div class="spacer"></div>
   <div class="seg" id="seg">
@@ -489,13 +499,13 @@ PAGE_TEMPLATE = """<!doctype html>
     document.body.classList.toggle('dark', t === 'dark');
     themeBtn.textContent = t === 'dark' ? '☀️' : '🌙';
   }
-  var theme = localStorage.getItem('grove_dash_theme') ||
+  var theme = localStorage.getItem('__THEME_KEY__') ||
     (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
       ? 'dark' : 'light');
   applyTheme(theme);
   themeBtn.addEventListener('click', function () {
     theme = (theme === 'dark') ? 'light' : 'dark';
-    localStorage.setItem('grove_dash_theme', theme);
+    localStorage.setItem('__THEME_KEY__', theme);
     applyTheme(theme);
   });
 
@@ -506,7 +516,8 @@ PAGE_TEMPLATE = """<!doctype html>
       '<a href="https://github.com/' + D.repo.owner + '/' + D.repo.name + '" target="_blank" rel="noopener">' +
       D.repo.owner + '/' + D.repo.name + '</a> · updated ' + relTime(D.generated_at) +
       ' <span title="' + gen.toISOString() + '">(' + gen.toUTCString().slice(5, 22) + ' UTC)</span>' +
-      ' · auto-refreshes every ~15 min · <a href="data.json">data.json</a>';
+      ' · auto-refreshes every ~15 min · <a href="data.json">data.json</a>' +
+      ' · <a href="../">all boards</a>';
   }
 
   render();
@@ -544,20 +555,72 @@ def render_html(items, cfg, now, project_meta, triaged_when_set):
         "items": items,
     }
     blob = json.dumps(payload).replace("</", "<\\/")
-    return PAGE_TEMPLATE.replace("__PAYLOAD__", blob)
+    return (PAGE_TEMPLATE
+            .replace("__BASE_CSS__", BASE_CSS)
+            .replace("__THEME_KEY__", THEME_KEY)
+            .replace("__TITLE__", cfg["title"])
+            .replace("__PAYLOAD__", blob))
 
 
+INDEX_TEMPLATE = """<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Triage boards</title>
+<style>__BASE_CSS__
+  .wrap { max-width: 720px; margin: 0 auto; padding: 44px 24px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: var(--subtle); font-size: 13px; margin-bottom: 24px; }
+  .board-card { display: block; background: var(--card); border-radius: 12px;
+                padding: 18px 22px; margin: 14px 0; box-shadow: var(--shadow);
+                color: var(--text); }
+  .board-card:hover { background: var(--hover); }
+  .board-card h2 { margin: 0 0 2px; font-size: 18px; }
+  .board-card .repo { color: var(--subtle); font-size: 13px; margin-bottom: 12px; }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Triage boards</h1>
+  <div class="sub">updated __UPDATED__ · auto-refreshes every ~15 min</div>
+__BOARDS__
+</div>
+<script>
+  if ((localStorage.getItem('__THEME_KEY__') ||
+       (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark')
+    document.body.classList.add('dark');
+</script>
+</body>
+</html>
+"""
 
 
-def main():
-    token = os.environ.get("GITHUB_TOKEN")
-    if not token:
-        sys.exit("GITHUB_TOKEN is required")
+def render_index(results, now):
+    cards = []
+    for slug, r in results.items():
+        pills = "".join(
+            f'<span class="cnt {key}" title="{desc}">{title} · {r["counts"].get(key, 0)}</span>'
+            for key, title, desc in SECTIONS)
+        cards.append(
+            f'  <a class="board-card" href="{slug}/">\n'
+            f'    <h2>{r["title"]}</h2>\n'
+            f'    <div class="repo">{r["repo"]["owner"]}/{r["repo"]["name"]}'
+            f' · {r["total"]} open items</div>\n'
+            f'    <div class="pills">{pills}</div>\n'
+            f'  </a>')
+    return (INDEX_TEMPLATE
+            .replace("__BASE_CSS__", BASE_CSS)
+            .replace("__THEME_KEY__", THEME_KEY)
+            .replace("__UPDATED__", now.strftime("%d %b %Y %H:%M UTC"))
+            .replace("__BOARDS__", "\n".join(cards)))
 
-    cfg = yaml.safe_load(Path(__file__).with_name("config.yaml").read_text())
+
+def build_project(cfg, token, now, out_dir):
+    """Fetch, classify, and render one project's board into out_dir."""
     maintainers = {m.lower() for m in cfg["maintainers"]}
     bots = {b.lower() for b in cfg.get("bots", [])}
-    now = datetime.now(timezone.utc)
     stale_cutoff = now - timedelta(days=cfg["stale_days"])
     variables = {"owner": cfg["repo"]["owner"], "name": cfg["repo"]["name"]}
 
@@ -625,15 +688,47 @@ def main():
               "issue. If the project does use them, the token cannot see the "
               "project items — set a PROJECTS_TOKEN secret with read:project.")
 
-    dist = Path(__file__).with_name("dist")
-    dist.mkdir(exist_ok=True)
-    (dist / "index.html").write_text(
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "index.html").write_text(
         render_html(items, cfg, now, project_meta, triaged_when_set))
-    (dist / "data.json").write_text(json.dumps(
+    (out_dir / "data.json").write_text(json.dumps(
         {"generated_at": now.isoformat(), "repo": cfg["repo"],
          "project": project_meta, "items": items}, indent=2))
     counts = Counter(it["section"] for it in items)
-    print(f"Wrote dist/index.html and dist/data.json — sections: {dict(counts)}")
+    print(f"Wrote {out_dir.name}/index.html and data.json — sections: {dict(counts)}")
+    return {"title": cfg["title"], "repo": cfg["repo"],
+            "counts": counts, "total": len(items)}
+
+
+def main():
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        sys.exit("GITHUB_TOKEN is required")
+
+    raw = yaml.safe_load(Path(__file__).with_name("config.yaml").read_text())
+    defaults = raw.get("defaults", {})
+    projects = {slug: {**defaults, **proj}
+                for slug, proj in raw["projects"].items()}
+
+    wanted = sys.argv[1:]
+    if unknown := set(wanted) - set(projects):
+        sys.exit(f"unknown project(s): {', '.join(sorted(unknown))} "
+                 f"— known: {', '.join(projects)}")
+    if wanted:
+        projects = {slug: projects[slug] for slug in wanted}
+
+    now = datetime.now(timezone.utc)
+    dist = Path(__file__).with_name("dist")
+    results = {}
+    for slug, cfg in projects.items():
+        print(f"=== {slug} ({cfg['repo']['owner']}/{cfg['repo']['name']}) ===")
+        results[slug] = build_project(cfg, token, now, dist / slug)
+
+    if wanted:
+        print("Partial build — skipping the root index page.")
+    else:
+        (dist / "index.html").write_text(render_index(results, now))
+        print(f"Wrote dist/index.html — boards: {', '.join(results)}")
 
 
 if __name__ == "__main__":

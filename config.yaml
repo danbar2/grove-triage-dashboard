@@ -1,43 +1,71 @@
-# Grove triage dashboard configuration
+# Triage boards configuration — one Kanban board per project, published at
+# /<slug>/ (the key under `projects` is the URL slug). Every setting in
+# `defaults` can be overridden per project.
 
-repo:
-  owner: ai-dynamo
-  name: grove
+defaults:
+  # Days without meaningful activity before an item is moved to the Stale column
+  stale_days: 80
 
-# Days without meaningful activity before an item is moved to the Stale section
-stale_days: 80
+  # An issue with ALL of these fields set is considered triaged and skips
+  # "Needs first response". issue_type is GitHub's native type (Bug/Feature/
+  # Task); other entries are Projects-v2 single-select field names (lowercase).
+  triaged_when_set:
+    - issue_type
+    - priority
 
-# An issue with ALL of these fields set is considered triaged and skips
-# "Needs first response". issue_type is GitHub's native type (Bug/Feature/
-# Task); other entries are Projects-v2 single-select field names (lowercase).
-# Note: the grove project has no Severity field (only status/priority/size),
-# so severity is not required here.
-triaged_when_set:
-  - issue_type
-  - priority
+  # Logins whose activity is ignored entirely (never counts as meaningful
+  # activity). Any login ending in "[bot]" is also ignored automatically.
+  bots:
+    - github-actions
+    - dependabot
+    - copilot
+    - chatgpt-codex-connector
+    - coderabbitai
+    - cursoragent
+    - copy-pr-bot
+    - nvidia-copy-pr-bot
 
-# GitHub logins treated as maintainers/team. If the last meaningful activity on
-# an item was by someone NOT on this list, the item needs maintainer attention.
-maintainers:
-  - danbar2
-  - shayasoolin
-  - shmuel-runai
-  - Ronkahn21
-  - gflarity
-  - oleg-kushniriov
-  - sanjaychatterjee
-  - enoodle
-  - unmarshall
-  - renormalize
+projects:
+  grove:
+    title: Grove triage board
+    repo:
+      owner: ai-dynamo
+      name: grove
+    # GitHub logins treated as maintainers/team. If the last meaningful
+    # activity on an item was by someone NOT on this list, the item needs
+    # maintainer attention.
+    maintainers:
+      - danbar2
+      - shayasoolin
+      - shmuel-runai
+      - Ronkahn21
+      - gflarity
+      - oleg-kushniriov
+      - sanjaychatterjee
+      - enoodle
+      - unmarshall
+      - renormalize
 
-# Logins whose activity is ignored entirely (never counts as meaningful
-# activity). Any login ending in "[bot]" is also ignored automatically.
-bots:
-  - github-actions
-  - dependabot
-  - copilot
-  - chatgpt-codex-connector
-  - coderabbitai
-  - cursoragent
-  - copy-pr-bot
-  - nvidia-copy-pr-bot
+  karta:
+    title: Karta triage board
+    repo:
+      owner: run-ai
+      name: karta
+    maintainers:
+      - danbar2
+      - yuval-gr
+      - lavianalon
+      - ronlv10
+      - itayvallach
+      - guywmartin
+      - ofir-eldar1
+      - irisgali
+      - EkinKarabulut
+      - yaelFrank
+      - shaked-bouktus
+      - Isan-Rivkin
+      - AviadHayumi
+      - shmuel-runai
+      - rogirun
+      - davidLif
+      - TomB30

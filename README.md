@@ -1,14 +1,18 @@
-# Grove triage board
+# Triage boards
 
-A Jira-style Kanban board for triaging
-[ai-dynamo/grove](https://github.com/ai-dynamo/grove) issues and PRs, rebuilt
-every ~15 minutes by GitHub Actions (using the repo's stored `PROJECTS_TOKEN`)
-and published on GitHub Pages. Read-only: refreshing the page always serves
-the latest snapshot — no viewer tokens, no editing.
+Jira-style Kanban boards for triaging the issues and PRs of several GitHub
+repos, rebuilt every ~15 minutes by GitHub Actions (using the repo's stored
+`PROJECTS_TOKEN`) and published on GitHub Pages. Read-only: refreshing the
+page always serves the latest snapshot — no viewer tokens, no editing.
 
-**Board:** https://danbar2.github.io/grove-triage-dashboard/
+**Boards index:** https://danbar2.github.io/triage-boards/
 
-## What it shows
+| Board | Watched repo |
+|---|---|
+| [Grove](https://danbar2.github.io/triage-boards/grove/) | [ai-dynamo/grove](https://github.com/ai-dynamo/grove) |
+| [Karta](https://danbar2.github.io/triage-boards/karta/) | [run-ai/karta](https://github.com/run-ai/karta) |
+
+## What each board shows
 
 For every open issue/PR it computes the **last meaningful activity** — comments,
 reviews, commits, force-pushes, review-thread replies, ready-for-review. Label,
@@ -29,40 +33,48 @@ Classification rule: if the last non-bot actor is a maintainer (and not the
 item's own author), the item is *awaiting author*; otherwise it's *awaiting
 maintainer* (or *needs first response* if no maintainer has ever engaged).
 
+## Configuration — adding a board
+
+Everything lives in [`config.yaml`](config.yaml): shared `defaults` (ignored
+bots, `stale_days: 80`, the triage-field rule) and a `projects` map with one
+entry per board. The key is the URL slug; each project sets its watched repo,
+its maintainers list, and may override any default.
+
+To add a project, add an entry under `projects:` and push — the next workflow
+run publishes it at `/<slug>/` and lists it on the index page.
+
 ## Data freshness
 
-The board is a static snapshot regenerated every ~15 minutes by the scheduled
-workflow (GitHub Actions cron is best-effort, so expect 15–25 minutes in
-practice). The header shows the snapshot's age. The token used for fetching
-lives only in the repo's Actions secrets — the page itself contains no
-credentials and performs no GitHub operations. For an immediate rebuild, run
-the workflow manually (Actions tab → "Run workflow", or
-`gh workflow run dashboard.yml -R danbar2/grove-triage-dashboard`).
+Every board is a static snapshot regenerated every ~15 minutes by the
+scheduled workflow (GitHub Actions cron is best-effort, so expect 15–25
+minutes in practice). The header shows the snapshot's age. The token used for
+fetching lives only in the repo's Actions secrets — the pages themselves
+contain no credentials and perform no GitHub operations. For an immediate
+rebuild, run the workflow manually (Actions tab → "Run workflow", or
+`gh workflow run dashboard.yml -R danbar2/triage-boards`).
 
 ### Project fields (Priority / Severity)
 
 The type comes from GitHub's native issue type; Priority and Severity are read
 from the issue's GitHub Project (v2) single-select fields named `Priority` and
-`Severity` (case-insensitive, any linked project). Reading Projects v2 requires
-a token with the `read:project` scope, which neither the default Actions token
-nor a plain `repo` PAT has. To enable the check, add a repo secret named
-**`PROJECTS_TOKEN`** containing a PAT with `repo` + `read:project` scopes
-(Settings → Secrets and variables → Actions). Note: the NVIDIA enterprise
-rejects classic PATs with a lifetime over 366 days, so set the token's
-expiration to a year or less. Without a working token the dashboard still
-works — it just can't see those fields, logs a warning, and treats no issue as
+`Severity` (case-insensitive, any linked project — e.g. Grove's roadmap board
+and [run-ai/projects/7](https://github.com/orgs/run-ai/projects/7) for Karta).
+Reading Projects v2 requires a token with the `read:project` scope, which
+neither the default Actions token nor a plain `repo` PAT has. To enable the
+check, add a repo secret named **`PROJECTS_TOKEN`** containing a PAT with
+`repo` + `read:project` scopes (Settings → Secrets and variables → Actions),
+authorized for every org whose projects it must read. Note: the NVIDIA
+enterprise rejects classic PATs with a lifetime over 366 days, so set the
+token's expiration to a year or less. Without a working token the boards still
+work — they just can't see those fields, log a warning, and treat no issue as
 triaged.
-
-## Configuration
-
-Everything lives in [`config.yaml`](config.yaml): watched repo, the maintainers
-list, ignored bots, and the staleness threshold (`stale_days: 80`).
 
 ## Running locally
 
 ```sh
 pip install requests pyyaml
-GITHUB_TOKEN=$(gh auth token) python generate.py
+GITHUB_TOKEN=$(gh auth token) python generate.py          # all boards
+GITHUB_TOKEN=$(gh auth token) python generate.py karta    # just one
 open dist/index.html
 ```
 
@@ -71,7 +83,9 @@ open dist/index.html
 The workflow also runs on every push to `main` and can be triggered manually:
 
 ```sh
-gh workflow run dashboard.yml -R danbar2/grove-triage-dashboard
+gh workflow run dashboard.yml -R danbar2/triage-boards
 ```
 
-`data.json` is published next to the page for building other views.
+Each board publishes a `data.json` next to its page (e.g.
+[`grove/data.json`](https://danbar2.github.io/triage-boards/grove/data.json))
+for building other views.
