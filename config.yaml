@@ -46,6 +46,25 @@ projects:
       - unmarshall
       - renormalize
 
+  kai:
+    title: KAI Scheduler triage board
+    repo:
+      owner: kai-scheduler
+      name: KAI-Scheduler
+    # Official maintainers group (MAINTAINERS.md / OWNERS in the repo)
+    maintainers:
+      - danbar2
+      - romanbaron
+      - omer-dayan
+      - itsomri
+      - enoodle
+      - davidLif
+      - keinandaniel
+      - EkinKarabulut
+      - Hagay-RunAI
+      - siormeir
+      - gshaibi
+
   karta:
     title: Karta triage board
     repo:
