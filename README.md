@@ -34,6 +34,11 @@ Classification rule: if the last non-bot actor is a maintainer (and not the
 item's own author), the item is *awaiting author*; otherwise it's *awaiting
 maintainer* (or *needs first response* if no maintainer has ever engaged).
 
+The header has a PRs/Issues toggle and a **user filter** — a dropdown of every
+person appearing on any item (author, assignee, requested reviewer, commenter,
+committer), most-active first. Both filters are kept in the URL hash, so a
+view like `…/grove/#pr&user=alice` can be bookmarked or shared.
+
 ## Configuration — adding a board
 
 Everything lives in [`config.yaml`](config.yaml): shared `defaults` (ignored

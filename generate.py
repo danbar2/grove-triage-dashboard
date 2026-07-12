@@ -17,6 +17,7 @@ every ~15 minutes with the repo's stored PROJECTS_TOKEN.
 
 import json
 import os
+import shutil
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -36,6 +37,10 @@ query($owner: String!, $name: String!, $cursor: String) {
       nodes {
         number title url isDraft createdAt
         author { login }
+        assignees(first: 10) { nodes { login } }
+        reviewRequests(first: 20) {
+          nodes { requestedReviewer { ... on User { login } } }
+        }
         labels(first: 10) { nodes { name } }
         reviewDecision
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -76,6 +81,7 @@ query($owner: String!, $name: String!, $cursor: String) {
       nodes {
         id number title url createdAt
         author { login }
+        assignees(first: 10) { nodes { login } }
         issueType { name }
         labels(first: 10) { nodes { name } }
         timelineItems(last: 60, itemTypes: [ISSUE_COMMENT]) {
@@ -243,6 +249,16 @@ def classify(node, is_pr, maintainers, bots, stale_cutoff, triaged_when_set):
 
     section = "stale" if last_ts < stale_cutoff else state
 
+    # Every human who appears on the item — author, assignees, requested
+    # reviewers, and anyone with a meaningful event — for the user filter.
+    assignees = [a["login"] for a in ((node.get("assignees") or {}).get("nodes") or [])]
+    reviewers = [((rr or {}).get("requestedReviewer") or {}).get("login")
+                 for rr in ((node.get("reviewRequests") or {}).get("nodes") or [])]
+    users = {}
+    for login in [author, *assignees, *reviewers, *(a for _, a, _ in events)]:
+        if login and not is_bot(login, bots):
+            users.setdefault(login.lower(), login)
+
     unresolved = None
     ci = None
     if is_pr:
@@ -259,6 +275,8 @@ def classify(node, is_pr, maintainers, bots, stale_cutoff, triaged_when_set):
         "title": node["title"],
         "url": node["url"],
         "author": author,
+        "assignees": assignees,
+        "users": sorted(users.values(), key=str.lower),
         "created_at": node["createdAt"],
         "is_draft": node.get("isDraft", False),
         "labels": [l["name"] for l in node["labels"]["nodes"]],
@@ -320,6 +338,7 @@ PAGE_TEMPLATE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__</title>
+<link rel="icon" type="image/png" href="../favicon.png">
 <style>__BASE_CSS__
   header { background: var(--card); border-bottom: 1px solid var(--line);
            padding: 16px 28px; display: flex; align-items: center; gap: 16px;
@@ -334,6 +353,11 @@ PAGE_TEMPLATE = """<!doctype html>
   .seg button.active { background: var(--sel-bg); color: var(--blue); font-weight: 600; }
   .gear { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
           padding: 8px 14px; font: inherit; cursor: pointer; color: var(--subtle); }
+  .usersel { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
+             padding: 8px 10px; font: inherit; color: var(--subtle); cursor: pointer;
+             max-width: 220px; }
+  .usersel.active { background: var(--sel-bg); border-color: var(--blue);
+                    color: var(--blue); font-weight: 600; }
 
   .board { display: flex; gap: 16px; align-items: flex-start; padding: 28px 32px;
            overflow-x: auto; min-height: calc(100vh - 72px);
@@ -390,6 +414,7 @@ PAGE_TEMPLATE = """<!doctype html>
     <button data-filter="pr">PRs</button>
     <button data-filter="issue">Issues</button>
   </div>
+  <select class="usersel" id="user" title="Show only items this user appears in (author, assignee, reviewer, commenter)"></select>
   <button class="gear" id="theme" title="Toggle dark/light mode">🌙</button>
 </header>
 <div class="board" id="board"></div>
@@ -400,6 +425,7 @@ PAGE_TEMPLATE = """<!doctype html>
   'use strict';
   var D = window.DASH;
   var filter = 'all';
+  var userFilter = '';
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -465,7 +491,8 @@ PAGE_TEMPLATE = """<!doctype html>
   function render() {
     document.getElementById('board').innerHTML = D.sections.map(function (sec) {
       var items = D.items.filter(function (i) {
-        return i.section === sec.key && (filter === 'all' || i.type === filter);
+        return i.section === sec.key && (filter === 'all' || i.type === filter) &&
+          (!userFilter || (i.users || []).indexOf(userFilter) >= 0);
       }).sort(function (a, b) { return b.last_activity_at.localeCompare(a.last_activity_at); });
       return '<div class="col">' +
         '<div class="colhead" title="' + esc(sec.desc) + '"><span>' + esc(sec.title) +
@@ -476,22 +503,57 @@ PAGE_TEMPLATE = """<!doctype html>
   }
 
   // ---- filters ----
+  function syncHash() {
+    var parts = [];
+    if (filter !== 'all') parts.push(filter);
+    if (userFilter) parts.push('user=' + encodeURIComponent(userFilter));
+    try {
+      history.replaceState(null, '', parts.length ? '#' + parts.join('&') : location.pathname);
+    } catch (e) {}
+  }
+
   var segButtons = document.querySelectorAll('#seg button');
   segButtons.forEach(function (b) {
     b.addEventListener('click', function () {
       filter = b.dataset.filter;
       segButtons.forEach(function (x) { x.classList.toggle('active', x === b); });
-      try {
-        history.replaceState(null, '', filter === 'all' ? location.pathname : '#' + filter);
-      } catch (e) {}
+      syncHash();
       render();
     });
   });
-  var initial = location.hash.replace('#', '');
-  if (initial === 'pr' || initial === 'issue') {
-    filter = initial;
-    segButtons.forEach(function (x) { x.classList.toggle('active', x.dataset.filter === initial); });
+
+  // Everyone who appears on at least one item, most-active first.
+  var userSel = document.getElementById('user');
+  function buildUserSelect() {
+    var counts = {};
+    D.items.forEach(function (it) {
+      (it.users || []).forEach(function (u) { counts[u] = (counts[u] || 0) + 1; });
+    });
+    var users = Object.keys(counts).sort(function (a, b) {
+      return counts[b] - counts[a] || a.toLowerCase().localeCompare(b.toLowerCase());
+    });
+    userSel.innerHTML = '<option value="">All users</option>' + users.map(function (u) {
+      return '<option value="' + esc(u) + '">' + esc(u) + ' (' + counts[u] + ')</option>';
+    }).join('');
+    if (userFilter && users.indexOf(userFilter) < 0) userFilter = '';
+    userSel.value = userFilter;
+    userSel.classList.toggle('active', !!userFilter);
   }
+  userSel.addEventListener('change', function () {
+    userFilter = userSel.value;
+    userSel.classList.toggle('active', !!userFilter);
+    syncHash();
+    render();
+  });
+
+  location.hash.replace('#', '').split('&').forEach(function (p) {
+    if (p === 'pr' || p === 'issue') {
+      filter = p;
+      segButtons.forEach(function (x) { x.classList.toggle('active', x.dataset.filter === p); });
+    } else if (p.indexOf('user=') === 0) {
+      try { userFilter = decodeURIComponent(p.slice(5)); } catch (e) {}
+    }
+  });
 
   // ---- theme ----
   var themeBtn = document.getElementById('theme');
@@ -520,6 +582,7 @@ PAGE_TEMPLATE = """<!doctype html>
       ' · <a href="../">all boards</a>';
   }
 
+  buildUserSelect();
   render();
   renderSub();
 
@@ -531,7 +594,7 @@ PAGE_TEMPLATE = """<!doctype html>
       if (d.generated_at && d.generated_at > D.generated_at) {
         D.items = d.items;
         D.generated_at = d.generated_at;
-        render(); renderSub();
+        buildUserSelect(); render(); renderSub();
       }
     })
     .catch(function () {});
@@ -568,6 +631,7 @@ INDEX_TEMPLATE = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Triage boards</title>
+<link rel="icon" type="image/png" href="favicon.png">
 <style>__BASE_CSS__
   .wrap { max-width: 720px; margin: 0 auto; padding: 44px 24px; }
   h1 { font-size: 24px; margin: 0 0 4px; }
@@ -719,6 +783,8 @@ def main():
 
     now = datetime.now(timezone.utc)
     dist = Path(__file__).with_name("dist")
+    dist.mkdir(exist_ok=True)
+    shutil.copy(Path(__file__).with_name("favicon.png"), dist / "favicon.png")
     results = {}
     for slug, cfg in projects.items():
         print(f"=== {slug} ({cfg['repo']['owner']}/{cfg['repo']['name']}) ===")
