@@ -38,9 +38,6 @@ query($owner: String!, $name: String!, $cursor: String) {
         number title url isDraft createdAt
         author { login }
         assignees(first: 10) { nodes { login } }
-        reviewRequests(first: 20) {
-          nodes { requestedReviewer { ... on User { login } } }
-        }
         labels(first: 10) { nodes { name } }
         reviewDecision
         commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
@@ -249,13 +246,14 @@ def classify(node, is_pr, maintainers, bots, stale_cutoff, triaged_when_set):
 
     section = "stale" if last_ts < stale_cutoff else state
 
-    # Every human who appears on the item — author, assignees, requested
-    # reviewers, and anyone with a meaningful event — for the user filter.
+    # Every human actually involved with the item — author, assignees, and
+    # anyone with a meaningful event (commenters, reviewers who reviewed,
+    # committers) — for the user filter. Requested reviewers are deliberately
+    # excluded: they're auto-populated from CODEOWNERS and mostly haven't
+    # engaged, so filtering on them surfaces items the "reviewer" never touched.
     assignees = [a["login"] for a in ((node.get("assignees") or {}).get("nodes") or [])]
-    reviewers = [((rr or {}).get("requestedReviewer") or {}).get("login")
-                 for rr in ((node.get("reviewRequests") or {}).get("nodes") or [])]
     users = {}
-    for login in [author, *assignees, *reviewers, *(a for _, a, _ in events)]:
+    for login in [author, *assignees, *(a for _, a, _ in events)]:
         if login and not is_bot(login, bots):
             users.setdefault(login.lower(), login)
 

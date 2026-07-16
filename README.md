@@ -35,9 +35,12 @@ item's own author), the item is *awaiting author*; otherwise it's *awaiting
 maintainer* (or *needs first response* if no maintainer has ever engaged).
 
 The header has a PRs/Issues toggle and a **user filter** — a dropdown of every
-person appearing on any item (author, assignee, requested reviewer, commenter,
-committer), most-active first. Both filters are kept in the URL hash, so a
-view like `…/grove/#pr&user=alice` can be bookmarked or shared.
+person actually involved with an item (author, assignee, or anyone who
+commented, reviewed, or pushed), most-active first. Requested reviewers are
+excluded on purpose: they're auto-populated from CODEOWNERS and mostly haven't
+engaged, so the filter reflects who has actually touched the item. Both filters
+are kept in the URL hash, so a view like `…/grove/#pr&user=alice` can be
+bookmarked or shared.
 
 ## Configuration — adding a board
 
