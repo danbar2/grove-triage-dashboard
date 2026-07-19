@@ -486,10 +486,22 @@ PAGE_TEMPLATE = """<!doctype html>
       '</div></div>';
   }
 
+  // The server bakes each item's `state` (needs_first_response, awaiting_*,
+  // triaged) and its `section` at generation time. Only the stale overlay is
+  // time-dependent, so recompute the section against the *current* clock on
+  // every render — an item silently crosses into Stale once it passes the
+  // stale_days cutoff, without waiting for the next scheduled rebuild.
+  var STALE_MS = (D.stale_days || 0) * 86400000;
+  function sectionOf(it) {
+    if (STALE_MS && new Date(it.last_activity_at).getTime() < Date.now() - STALE_MS)
+      return 'stale';
+    return it.state || it.section;
+  }
+
   function render() {
     document.getElementById('board').innerHTML = D.sections.map(function (sec) {
       var items = D.items.filter(function (i) {
-        return i.section === sec.key && (filter === 'all' || i.type === filter) &&
+        return sectionOf(i) === sec.key && (filter === 'all' || i.type === filter) &&
           (!userFilter || (i.users || []).indexOf(userFilter) >= 0);
       }).sort(function (a, b) { return b.last_activity_at.localeCompare(a.last_activity_at); });
       return '<div class="col">' +
