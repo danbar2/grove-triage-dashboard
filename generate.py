@@ -351,6 +351,8 @@ PAGE_TEMPLATE = """<!doctype html>
   .seg button.active { background: var(--sel-bg); color: var(--blue); font-weight: 600; }
   .gear { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
           padding: 8px 14px; font: inherit; cursor: pointer; color: var(--subtle); }
+  .gear.active { background: var(--sel-bg); border-color: var(--blue);
+                 color: var(--blue); font-weight: 600; }
   .usersel { background: var(--card); border: 1px solid var(--line); border-radius: 6px;
              padding: 8px 10px; font: inherit; color: var(--subtle); cursor: pointer;
              max-width: 220px; }
@@ -413,6 +415,7 @@ PAGE_TEMPLATE = """<!doctype html>
     <button data-filter="issue">Issues</button>
   </div>
   <select class="usersel" id="user" title="Show only items this user appears in (author, assignee, reviewer, commenter)"></select>
+  <button class="gear" id="drafts" title="Hide draft pull requests">Hide drafts</button>
   <button class="gear" id="theme" title="Toggle dark/light mode">🌙</button>
 </header>
 <div class="board" id="board"></div>
@@ -424,6 +427,7 @@ PAGE_TEMPLATE = """<!doctype html>
   var D = window.DASH;
   var filter = 'all';
   var userFilter = '';
+  var hideDrafts = false;
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -502,6 +506,7 @@ PAGE_TEMPLATE = """<!doctype html>
     document.getElementById('board').innerHTML = D.sections.map(function (sec) {
       var items = D.items.filter(function (i) {
         return sectionOf(i) === sec.key && (filter === 'all' || i.type === filter) &&
+          (!hideDrafts || !i.is_draft) &&
           (!userFilter || (i.users || []).indexOf(userFilter) >= 0);
       }).sort(function (a, b) { return b.last_activity_at.localeCompare(a.last_activity_at); });
       return '<div class="col">' +
@@ -516,6 +521,7 @@ PAGE_TEMPLATE = """<!doctype html>
   function syncHash() {
     var parts = [];
     if (filter !== 'all') parts.push(filter);
+    if (hideDrafts) parts.push('nodrafts');
     if (userFilter) parts.push('user=' + encodeURIComponent(userFilter));
     try {
       history.replaceState(null, '', parts.length ? '#' + parts.join('&') : location.pathname);
@@ -556,10 +562,22 @@ PAGE_TEMPLATE = """<!doctype html>
     render();
   });
 
+  // ---- hide-drafts toggle ----
+  var draftsBtn = document.getElementById('drafts');
+  draftsBtn.addEventListener('click', function () {
+    hideDrafts = !hideDrafts;
+    draftsBtn.classList.toggle('active', hideDrafts);
+    syncHash();
+    render();
+  });
+
   location.hash.replace('#', '').split('&').forEach(function (p) {
     if (p === 'pr' || p === 'issue') {
       filter = p;
       segButtons.forEach(function (x) { x.classList.toggle('active', x.dataset.filter === p); });
+    } else if (p === 'nodrafts') {
+      hideDrafts = true;
+      draftsBtn.classList.add('active');
     } else if (p.indexOf('user=') === 0) {
       try { userFilter = decodeURIComponent(p.slice(5)); } catch (e) {}
     }
